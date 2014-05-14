@@ -9,36 +9,76 @@ module y2x #(parameter PARA_DW = 'd12) (
   input [PARA_DW-1:0]   y2r_01,
   input [PARA_DW-1:0]   y2r_02,
   //-
-  input [PARA_DW-1:0]   y2r_10,
-  input [PARA_DW-1:0]   y2r_11,
-  input [PARA_DW-1:0]   y2r_12,
-  //-
-  input [PARA_DW-1:0]   y2r_20,
-  input [PARA_DW-1:0]   y2r_21,
-  input [PARA_DW-1:0]   y2r_22,
-  //-
   input [PARA_DW-1+8:0]   y2r_03,
-  input [PARA_DW-1+8:0]   y2r_13,
-  input [PARA_DW-1+8:0]   y2r_23,
   //--
   input [7:0]          in_y,    //unsign
-  input [7:0]          in_xb,   // unsign
-  input [7:0]          in_xr,   // unsign
+  input [7:0]          in_xb,    //unsign
+  input [7:0]          in_xr,    //unsign
   //--
-  input [11:0]         add_sub_ctrl,
+  input [3:0]          add_sub_ctrl,
   input [7:0]          round_num,
   input [4:0]          shift_num,
-
   //--
   output reg [7:0]    pre_r,
-  output reg [7:0]    pre_g,
-  output reg [7:0]    pre_b
-
   );
 
+  reg [PARA_DW+8 - 1 : 0] y2r_00_mul_y;
+  reg [PARA_DW+8 - 1 : 0] y2r_01_mul_xb;
+  reg [PARA_DW+8 - 1 : 0] y2r_02_mul_xr;
+  reg [PARA_DW+8 : 0]     r_tmp;
+  reg [31 : 0]            r_tmp_2;
+
+  multi#(PARA_DW, 8)  (y2r_00, in_y , y2r_00_mul_y) ;
+  multi#(PARA_DW, 8)  (y2r_01, in_xb, y2r_00_mul_xb) ;
+  multi#(PARA_DW, 8)  (y2r_01, in_xr, y2r_00_mul_xr) ;
+
+  addsub_tmp #(PARA_DW+8)  (y2r_00_mul_y, y2r_01_mul_xb, y2r_02_mul_xr, y2r_03, add_sub_ctrl, r_tmp);
+
+  // scale :
+  r_tmp_2 = r_tmp << round_num;
+  pre_r   = r_tmp_2 >> shift_num;
+
+endmodule
+
+//_ module scale_complete (
+
+//_   );
   
 
+//_ endmodule  
 
+module addsub #(parameter A_DW ='d 20) (
+  input [A_DW-1:0] in_1,
+  input [A_DW-1:0] in_2,
+  input            carry_in,
+
+  output reg [A_DW-1:0] sum,
+  output reg       carry_out
+  )
+
+  // ---
+  reg [A_DW:0]   c_tmp;
+  integer     i;
+
+  always @ (in_1 or in_2 or carry_in)   begin
+    c_tmp[0]=carry_in;
+    if (carry_in == 0) begin  // is adder
+      for ( i=0; i< A_DW ; i=i+1)
+      begin
+        sum[i]= in_1[i]^in_2[i]^ c_tmp[i];
+        c_tmp[i+1]= (in_1[i]&in_2[i]) |  (in_1[i]&c_tmp[i]) | (in_2[i]&c_tmp[i]);
+      end
+    end
+
+    else if (carry_in == 1) begin  // subtractor
+      for ( i=0; i<A_DW ; i=i+1)
+      begin
+        sum[i] = in_1[i]^ (~ in_2[i]) ^ c_tmp[i];
+        c_tmp[i+1]= (in_1[i] & (~in_2[i]))  |  (in_1[i]&c_tmp[i]) | ((~in_2[i])&c_tmp[i]);
+      end
+    end
+    carry_out=c_tmp[A_DW];
+  end
 endmodule
 
 
@@ -49,6 +89,7 @@ module multi #(parameter A_DW= 'd12, parameter B_DW= 'd8) (a , b , result);
 
   input [A_DW-1 :0] a;
   input [B_DW-1 :0] b;
+  integer           i;
 
   output [Q_DW -1 :0] result;
 
@@ -79,5 +120,58 @@ module multi #(parameter A_DW= 'd12, parameter B_DW= 'd8) (a , b , result);
 *****/
 
   
+endmodule
+
+
+
+/// --- not use ------------
+module addsub_tmp #(
+  parameter A_DW = 'd20 
+//_   parameter B_DW = 'd20, 
+//_   parameter C_DW = 'd20, parameter D_DW = 'd20, 
+  ) 
+  (
+  input [A_DW-1:0] in_a,
+  input [A_DW-1:0] in_b,
+  input [A_DW-1:0] in_c,
+  input [A_DW-1:0] in_d,
+  input [3:0]          add_sub_en,	  //  0, add; 1: subtract
+  output reg [A_DW:0] result
+  );
+  reg [A_DW+1:0] q ;
+   
+  always @ (*) begin
+    case (add_sub_en[2:0]) 
+      3'b111 : begin
+               result = in_a - in_b - in_c - in_d;
+      end
+      3'b110 : begin
+               result = in_a - in_b - in_c + in_d;
+      end
+      3'b101 : begin
+               result = in_a - in_b + in_c - in_d;
+      end
+      3'b100 : begin
+               result = in_a - in_b + in_c + in_d;
+      end
+      3'b011 : begin
+               result = in_a + in_b - in_c - in_d;
+      end
+      3'b010 : begin
+               result = in_a + in_b - in_c + in_d;
+      end
+      3'b001 : begin
+               result = in_a + in_b + in_c - in_d;
+      end
+      3'b000 : begin
+               result = in_a + in_b + in_c + in_d;
+      end
+    endcase  
+    if (result < 0) result = (~result) + 1'b1;
+  end
+
+  
+
+
 endmodule
 
